@@ -1,0 +1,1 @@
+# Analise-de-dados-de-sensoriamento-utilizando-pthreads
