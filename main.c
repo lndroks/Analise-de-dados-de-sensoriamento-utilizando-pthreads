@@ -14,6 +14,33 @@ int total_timestamps = 0;
 
 pthread_mutex_t mutex_timestamps = PTHREAD_MUTEX_INITIALIZER;
 
+// ============================================================
+// SISTEMA DE PROCESSAMENTO DE DADOS DE SENSORES COM PTHREADS
+// ============================================================
+//
+// Objetivo:
+// Ler arquivos JSON contendo medições de sensores IoT,
+// processar os dados utilizando múltiplas threads e gerar
+// estatísticas para as cidades de Caxias do Sul e Bento Gonçalves.
+//
+// Fluxo geral:
+// 1. A thread produtora lê os arquivos JSON.
+// 2. Os dados são inseridos em um buffer compartilhado.
+// 3. A thread consumidora remove os dados do buffer.
+// 4. As estatísticas são calculadas.
+// 5. Uma thread separada registra logs de auditoria.
+// 6. Ao final, os resultados são exibidos no terminal.
+//
+// Threads utilizadas:
+// - thread_leitura      -> Produtora
+// - thread_estatisticas -> Consumidora
+// - thread_logs         -> Auditoria
+//
+// Sincronização:
+// - Mutex protege acesso ao buffer compartilhado.
+// - Variáveis de condição controlam produção e consumo.
+// ============================================================
+
 // --- 1. ESTRUTURAS DE DADOS ---
 typedef struct {
     char cidade[50];
@@ -30,6 +57,17 @@ Medicao buffer_medicoes[TAMANHO_BUFFER];
 int total_no_buffer = 0;
 int leitura_concluida = 0; 
 
+
+// ------------------------------------------------------------
+// Verifica se um timestamp já foi processado.
+//
+// Utiliza mutex para impedir acesso simultâneo à lista
+// timestamps_vistos.
+//
+// Retorno:
+// 1 -> timestamp já existe
+// 0 -> timestamp novo
+// ------------------------------------------------------------
 int eh_duplicata(const char *timestamp){
 
     pthread_mutex_lock(&mutex_timestamps);
@@ -55,7 +93,19 @@ pthread_mutex_t mutex_buffer = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t cond_pode_produzir = PTHREAD_COND_INITIALIZER;
 pthread_cond_t cond_pode_consumir = PTHREAD_COND_INITIALIZER;
 
-// Função auxiliar para ler arquivo para a memória
+// ------------------------------------------------------------
+// Lê um arquivo inteiro para memória.
+//
+// Passos:
+// 1. Abre o arquivo.
+// 2. Descobre o tamanho.
+// 3. Aloca memória dinamicamente.
+// 4. Copia todo o conteúdo.
+// 5. Retorna um ponteiro para o conteúdo.
+//
+// Retorno:
+// Ponteiro char* contendo o JSON completo.
+// ------------------------------------------------------------
 char* ler_arquivo(const char* nome_arquivo) {
     FILE *f = fopen(nome_arquivo, "rb");
     if (!f) return NULL;
@@ -70,6 +120,19 @@ char* ler_arquivo(const char* nome_arquivo) {
 }
 
 // Função que processa um arquivo e joga no Buffer
+// ------------------------------------------------------------
+// Processa um arquivo JSON contendo medições.
+//
+// Responsabilidades:
+// - Ler o arquivo.
+// - Interpretar o JSON usando cJSON.
+// - Extrair variáveis dos sensores.
+// - Criar estruturas Medicao.
+// - Eliminar medições duplicadas.
+// - Inserir medições no buffer compartilhado.
+//
+// Esta função atua como PRODUTORA de dados.
+// ------------------------------------------------------------
 void processar_arquivo_json(const char* nome_arquivo) {
     char *conteudo_json = ler_arquivo(nome_arquivo);
     if (!conteudo_json) {
@@ -85,6 +148,7 @@ void processar_arquivo_json(const char* nome_arquivo) {
 
     int total_itens = cJSON_GetArraySize(json_array);
 
+    // Percorre cada item do array principal do JSON
     for (int i = 0; i < total_itens; i++) {
         cJSON *item = cJSON_GetArrayItem(json_array, i);
 
@@ -94,6 +158,7 @@ void processar_arquivo_json(const char* nome_arquivo) {
 
         if (texto_interno && cJSON_IsString(texto_interno)) {
 
+            // Converte a string interna em um novo JSON
             cJSON *inner_json = cJSON_Parse(texto_interno->valuestring);
 
             if (inner_json) {
@@ -119,6 +184,8 @@ void processar_arquivo_json(const char* nome_arquivo) {
                     // Varre as variaveis dentro do "data"
                     int qtd_dados = cJSON_GetArraySize(data_array);
 
+                    // Percorre todas as variáveis do sensor
+                    // (temperatura, umidade, pressão, bateria, etc.)
                     for (int j = 0; j < qtd_dados; j++) {
 
                         cJSON *dado = cJSON_GetArrayItem(data_array, j);
@@ -194,6 +261,18 @@ void processar_arquivo_json(const char* nome_arquivo) {
 }
 
 // --- 3. THREAD DE LEITURA (PRODUTORA) ---
+// ------------------------------------------------------------
+// Thread PRODUTORA.
+//
+// Responsável por:
+// - Ler os dois arquivos JSON.
+// - Processar os dados.
+// - Inserir medições no buffer.
+//
+// Ao finalizar:
+// - Marca leitura_concluida = 1
+// - Acorda consumidores esperando dados.
+// ------------------------------------------------------------
 void* thread_leitura(void* arg) {
     printf("[Produtor] Lendo senzemo_cx_bg.json...\n");
     processar_arquivo_json("senzemo_cx_bg.json");
@@ -239,7 +318,20 @@ Estatisticas est_caxias = {0};
 Estatisticas est_bento = {0};
 
 // Função auxiliar para atualizar as estatísticas de uma cidade
+// ------------------------------------------------------------
+// Atualiza as estatísticas de uma cidade.
+//
+// Calcula:
+// - Temperatura mínima, máxima e média
+// - Umidade mínima, máxima e média
+// - Pressão mínima, máxima e média
+// - Consumo de bateria
+// - Spreading Factors utilizados
+//
+// Cada medição recebida atualiza os acumuladores.
+// ------------------------------------------------------------
 void atualizar_estatisticas(Estatisticas *est, Medicao m) {
+    // Inicializa valores extremos na primeira medição
     // Inicializa os mínimos com valores altíssimos na primeira vez
     if (est->contagem == 0) {
         est->min_temp = 999.0; est->max_temp = -999.0;
@@ -269,6 +361,8 @@ void atualizar_estatisticas(Estatisticas *est, Medicao m) {
     }
 
     // Processa Bateria
+    // Guarda primeiro e último valor de bateria
+    // para calcular consumo posteriormente
     if (m.bateria != -999.0) {
         if (est->bat_registrada == 0) {
             est->bat_inicial = m.bateria; 
@@ -286,16 +380,32 @@ void atualizar_estatisticas(Estatisticas *est, Medicao m) {
 }
 
 // --- 4. THREAD DE ESTATÍSTICAS (CONSUMIDORA) ---
+// ------------------------------------------------------------
+// Thread CONSUMIDORA.
+//
+// Responsável por:
+// - Remover medições do buffer.
+// - Identificar a cidade da medição.
+// - Atualizar estatísticas.
+//
+// Funciona em paralelo com a thread de leitura.
+// ------------------------------------------------------------
 void* thread_estatisticas(void* arg) {
     while (1) {
         pthread_mutex_lock(&mutex_buffer);
         
         while (total_no_buffer == 0 && !leitura_concluida) {
+            // Espera enquanto o buffer estiver vazio
+            // e a leitura ainda não terminou
             pthread_cond_wait(&cond_pode_consumir, &mutex_buffer);
         }
         
         if (total_no_buffer == 0 && leitura_concluida) {
             pthread_mutex_unlock(&mutex_buffer);
+
+            // Encerra quando:
+            // - Não há mais dados no buffer
+            // - A leitura já terminou
             break;
         }
         
@@ -318,6 +428,17 @@ void* thread_estatisticas(void* arg) {
 }
 
 // --- 4.5 THREAD DE LOGS (AUDITORIA) ---
+// ------------------------------------------------------------
+// Thread de AUDITORIA.
+//
+// Responsável por:
+// - Registrar atividade do sistema.
+// - Monitorar tamanho do buffer.
+// - Monitorar quantidade de medições processadas.
+//
+// Gera o arquivo:
+// log_auditoria.txt
+// ------------------------------------------------------------
 void* thread_logs(void* arg) {
     FILE *f_log = fopen("log_auditoria.txt", "w");
     if (!f_log) {
@@ -347,6 +468,9 @@ void* thread_logs(void* arg) {
 
         // Dorme por 10 milissegundos (0.01 segundos) para não gerar um arquivo gigante e não travar a CPU
         struct timespec ts = {0, 10000000L};
+
+        // Pequena pausa para evitar uso excessivo da CPU
+        // e geração exagerada de logs
         nanosleep(&ts, NULL);
     }
 
@@ -356,6 +480,18 @@ void* thread_logs(void* arg) {
 }
 
 // --- 5. FUNÇÃO DE IMPRESSÃO (TEMPLATE) ---
+// ------------------------------------------------------------
+// Exibe o relatório final do processamento.
+//
+// Mostra:
+// - Quantidade de registros
+// - Estatísticas de temperatura
+// - Estatísticas de umidade
+// - Estatísticas de pressão
+// - Consumo de bateria
+// - Spreading Factors utilizados
+// - Tempo total de execução
+// ------------------------------------------------------------
 void imprimir_resultados(double tempo_gasto) {
     printf("\n============================================================\n");
     printf("ANALISE DE DADOS DOS SENSORES - CityLivingLab\n");
@@ -445,6 +581,16 @@ void imprimir_resultados(double tempo_gasto) {
     printf("============================================================\n");
 }
 
+// ------------------------------------------------------------
+// Função principal do programa.
+//
+// Fluxo:
+// 1. Inicia medição de tempo.
+// 2. Cria as threads.
+// 3. Aguarda todas terminarem.
+// 4. Calcula tempo total.
+// 5. Exibe relatório final.
+// ------------------------------------------------------------
 int main() {
     struct timeval inicio, fim;
     gettimeofday(&inicio, NULL);
