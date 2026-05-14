@@ -1,29 +1,76 @@
-# Processador de Dados IoT - CityLivingLab
+# Analise-de-dados-de-sensoriamento-utilizando-pthreads
 
-Este projeto foi desenvolvido para a disciplina de Fundamentos de Sistemas Operacionais na Universidade de Caxias do Sul (UCS). O software realiza o processamento paralelo de arquivos JSON contendo dados de sensores IoT (temperatura, umidade, pressão, bateria) das cidades de Caxias do Sul e Bento Gonçalves.
+## Compilar o programa: 
 
-## 🚀 O que o projeto faz
-- Lê milhares de registros de sensores IoT.
-- Descarta pacotes de dados duplicados ou corrompidos.
-- Calcula médias, valores máximos e mínimos para cada cidade.
-- Registra o andamento do processamento em um arquivo de log.
+`
+gcc main.c cJSON.c -o sensores -lpthread
+`
 
-## 🛠️ Como foi construído
-O sistema foi escrito em **C** e utiliza **POSIX Threads (pthreads)** para processar os dados concorrentemente, dividindo o trabalho em 3 tarefas principais de forma sincronizada (Modelo Produtor-Consumidor com Mutex):
-1. **Thread de Leitura (Produtor)**
-2. **Thread de Estatísticas (Consumidor)**
-3. **Thread de Logs (Auditoria)**
+ou (se usar clock do sistema):
 
-*A biblioteca `cJSON` foi utilizada para a extração dos dados dos arquivos de texto.*
+`
+gcc main.c cJSON.c -o sensores -lpthread -lrt
+`
 
-## ⚙️ Como executar
+--> gera o executavel = sensores
 
-Para rodar este projeto, você precisa de um ambiente Linux (ou WSL/VM) com o compilador `gcc` instalado.
+## EXECUTAR PROGRAMA
 
-1. Faça o clone do repositório e abra a pasta do projeto no terminal.
-2. Compile o código com o seguinte comando:
-   ```bash
-   gcc main.c cJSON.c -o trabalho -pthread
-3. Execute o programa:
-   ```bash
-    ./trabalho
+rodar ./sensores
+
+Se tudo estiver correto você verá algo como:
+
+[Produtor] Lendo senzemo_cx_bg.json...
+[Produtor] Lendo mqtt_senzemo_cx_bg.json...
+[Produtor] Finalizou a leitura de todos os arquivos.
+[Consumidor] Estatisticas calculadas com sucesso!
+
+Depois aparecerá o relatório:
+
+============================================================
+ANALISE DE DADOS DOS SENSORES - CityLivingLab
+Processamento utilizando pthreads
+============================================================
+
+Total de registros processados Caxias: 52184
+Total de registros processados Bento: 52184
+
+------------------------------------------------------------
+TEMPERATURA (C)
+------------------------------------------------------------
+Cidade            | Minima | Data/Hora             | Maxima | Data/Hora             | Media
+-----------------------------------------------------------------------------------------------
+Caxias do Sul     | ...
+Bento Goncalves   | ...
+
+Verificar o arquivo de log
+
+Seu programa também cria um log:
+
+log_auditoria.txt
+
+Para ver:
+
+cat log_auditoria.txt
+
+ou
+
+nano log_auditoria.txt
+
+###  Se der erro de pthread
+
+Compile assim:
+
+gcc -pthread main.c cJSON.c -o sensores
+
+### Se quiser testar performance
+
+Rode com:
+
+time ./sensores
+
+Ele vai mostrar o tempo também
+
+## APós rodar
+
+nano processamento.log
